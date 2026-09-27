@@ -100,6 +100,8 @@ _dev/
   render-debug.js     渲染问题定位工具
   shots/              验收截图
   .profile/           CDP 复用的浏览器 profile（让 3MB 模型留在缓存里，能跑到真实追踪分支）
+                     注意：跑完会长到 ~470MB（浏览器缓存的锅），可以随时删，
+                     删了下次跑首轮会变冷缓存、慢 ~20 秒而已
 
 _deploy/
   deploy.js           无 git CLI 的发布：建仓 + 开 Pages + Git Data API 推送 + 线上探针
