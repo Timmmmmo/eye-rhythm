@@ -119,14 +119,44 @@ window.XTJY = window.XTJY || {};
   }
 
   function loadModel() {
+    return ensureModel(true).then(function () { return T.status; });
+  }
+
+  // 模型只加载一次：预热和正式初始化共用同一个 promise，避免下两遍
+  var modelPromise = null;
+
+  /**
+   * @param reportStatus true = 这次加载要负责更新界面状态（init 走的路）
+   *                     false = 静默预热（首页 idle 时走的路，不碰摄像头 → 不弹权限框）
+   */
+  function ensureModel(reportStatus) {
+    if (T.landmarker) {
+      if (reportStatus) setStatus("ready");
+      return Promise.resolve(T.landmarker);
+    }
+    if (modelPromise) {
+      // 已经有加载中的任务（比如首页预热起了头），挂上去等它，别重复下 3MB
+      return modelPromise.then(function (lm) {
+        if (reportStatus && lm) setStatus("ready");
+        else if (reportStatus && !lm) setStatus("nomodel");
+        return lm;
+      });
+    }
+
     // 模型要从 CDN 下 3MB 左右。国内网络可能很慢甚至不可达——绝不能让它把界面卡死：
     //   14 秒还没好，就先切到「按压模式」让玩家能玩；模型真的下下来了再自动升级为真实追踪。
+    //   （静默预热时不设这个 14 秒的界面计时器，因为那时还没有"界面"要照顾）
     var settled = false;
-    var timer = setTimeout(function () {
-      if (!settled && !T.landmarker) { settled = true; setStatus("nomodel", "超时"); }
-    }, 14000);
+    var timer = reportStatus
+      ? setTimeout(function () {
+          if (!settled && !T.landmarker) { settled = true; setStatus("nomodel", "超时"); }
+        }, 14000)
+      : setTimeout(function () {
+          // 静默路径的兜底：真卡住了就把 promise 清掉，允许用户点进训练时重新发起
+          if (!settled && !T.landmarker) { settled = true; modelPromise = null; }
+        }, 90000);
 
-    return import(/* webpackIgnore: true */ VISION_URL).then(function (mod) {
+    modelPromise = import(/* webpackIgnore: true */ VISION_URL).then(function (mod) {
       var Vision = mod.FilesetResolver ? mod : mod.default;
       return Vision.FilesetResolver.forVisionTasks(WASM_URL).then(function (fileset) {
         return Vision.FaceLandmarker.createFromOptions(fileset, {
@@ -141,13 +171,30 @@ window.XTJY = window.XTJY || {};
       T.landmarker = lm;
       clearTimeout(timer);
       settled = true;
-      setStatus("ready");
-      return T.status;
+      if (reportStatus) setStatus("ready");
+      return lm;
     }).catch(function () {
       clearTimeout(timer);
-      if (!settled) { settled = true; setStatus("nomodel"); }
-      return T.status;
+      if (!settled) { settled = true; if (reportStatus) setStatus("nomodel"); }
+      modelPromise = null;   // 失败就别把坏 promise 粘住，下次还能重试
+      return null;
     });
+    return modelPromise;
+  }
+
+  /**
+   * 静默预热：只下模型/WASM 进缓存，**不申请摄像头**（所以不会一进首页就弹权限框）。
+   * 实测线上首次冷缓存要 ~17 秒才 ready —— 把这 17 秒藏到用户看首页的时候，
+   * 比让他点进训练再干等好得多。省流量 / 慢网时主动跳过。
+   */
+  function warm() {
+    if (T.landmarker || modelPromise) return modelPromise || Promise.resolve(T.landmarker);
+    try {
+      var c = navigator.connection || navigator.mozConnection || {};
+      if (c.saveData) return Promise.resolve(null);                       // 用户开了省流量
+      if (/^(slow-)?2g$/.test(String(c.effectiveType || ""))) return Promise.resolve(null);  // 慢网别下 3MB
+    } catch (_) {}
+    return ensureModel(false);
   }
 
   function stop() {
@@ -263,6 +310,7 @@ window.XTJY = window.XTJY || {};
 
   N.track = {
     init: init,
+    warm: warm,
     read: read,
     stop: stop,
     setMock: setMock,

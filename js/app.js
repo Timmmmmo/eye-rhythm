@@ -745,6 +745,13 @@
     renderHome();
     // 首页先预热摄像头状态文案（不主动开摄像头，避免一进来就弹权限）
     updateCamLine();
+
+    // 静默预热模型：只下模型/WASM，不申请摄像头，所以不会弹权限框。
+    // 线上冷缓存实测要 ~17 秒才 ready，把这 17 秒藏进用户看首页的时间里，
+    // 等他点「开始」时摄像头基本已经就绪。慢网/省流量模式在 track.warm() 里会自动跳过。
+    setTimeout(function () {
+      try { N.track.warm(); } catch (_) {}
+    }, 1200);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
