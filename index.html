@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="description" content="对视 · 眼神节奏训练：一天 3 分钟，把稳视时长变成看得见的曲线。面试、相亲、述职之前，先练 3 天。">
+<title>对视 · 眼神节奏训练</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <header id="top">
+    <div class="brand"><i class="bdot"></i>对视<em>Eye Rhythm</em></div>
+    <button class="chip" id="btnToday"><span>今日</span><b id="todayScore">—</b></button>
+    <button class="icon-btn" id="btnRule" aria-label="3 秒法则">?</button>
+  </header>
+
+  <main id="main">
+
+    <!-- ============ 首页 ============ -->
+    <section class="screen show" id="screenHome">
+      <div class="card hero">
+        <div class="hero-top">
+          <div>
+            <div class="score-big" id="scoreBig"><span id="homeScore">—</span><i>分</i></div>
+            <div class="score-lbl">今日稳视分</div>
+          </div>
+          <div class="spark-wrap">
+            <canvas id="spark" width="260" height="70"></canvas>
+            <div class="spark-hint" id="sparkHint">练一轮就有曲线了</div>
+          </div>
+        </div>
+        <div class="streak" id="homeStreak">还没有记录 · 今天开个头</div>
+        <div class="metrics" id="homeMetrics"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">选择难度阶梯<span class="hint">逐步暴露 · 过关解锁</span></div>
+        <div class="levels" id="levelList"></div>
+      </div>
+
+      <div class="grid2">
+        <button class="tile" id="goQuiz">
+          <b>眼力游戏</b><span>读懂眼神 · 10 题</span>
+        </button>
+        <button class="tile" id="goAnimal">
+          <b>动物挑战</b><span>你能和它对视几秒</span>
+        </button>
+      </div>
+
+      <div class="card mini" id="privacyNote">
+        <b>你的脸不出你的手机</b>
+        <span>画面只在本机计算，不上传、不存储、不留帧。关掉摄像头也能玩眼力游戏和动物挑战。</span>
+      </div>
+    </section>
+
+    <!-- ============ 训练 ============ -->
+    <section class="screen" id="screenTrain">
+      <div class="stage-wrap">
+        <canvas id="stage"></canvas>
+        <video id="cam" playsinline muted autoplay></video>
+
+        <div class="hud-top">
+          <div class="hud-pill" id="roundPill">注视 0.0s<span class="tgt">/ 目标 3s</span></div>
+          <div class="hud-pill alt" id="hitPill">命中 —</div>
+        </div>
+
+        <div class="hud-state" id="stateBanner">准备开始</div>
+
+        <div class="hud-bottom">
+          <div class="bar"><i id="holdBar"></i></div>
+          <div class="hud-note" id="hudNote">看它的眼睛，2～3 秒刚好</div>
+        </div>
+
+        <div class="breath" id="breathBox">
+          <div class="breath-ring"><span id="breathTxt">吸气</span></div>
+          <div class="breath-tip">心跳有点快，跟着呼吸 15 秒再回来</div>
+        </div>
+      </div>
+
+      <div class="train-actions">
+        <button class="btn ghost" id="btnTrainExit">退出</button>
+        <button class="btn primary" id="btnTrainStart">开始</button>
+        <button class="btn ghost" id="btnTrainShot">咔嚓</button>
+      </div>
+      <div class="camline" id="camLine">摄像头：初始化中…</div>
+    </section>
+
+    <!-- ============ 复盘 ============ -->
+    <section class="screen" id="screenResult">
+      <div class="card hero">
+        <div class="hero-top">
+          <div>
+            <div class="score-big"><span id="resScore">—</span><i>分</i></div>
+            <div class="score-lbl" id="resTitle">本轮稳视分</div>
+          </div>
+          <div class="verdict" id="resVerdict"></div>
+        </div>
+        <div class="metrics" id="resMetrics"></div>
+      </div>
+      <div class="card" id="resAdviceCard">
+        <div class="card-h">这一轮的问题</div>
+        <ul class="advice" id="resAdvice"></ul>
+      </div>
+      <div class="train-actions">
+        <button class="btn ghost" id="btnResHome">回首页</button>
+        <button class="btn primary" id="btnResAgain">再来一轮</button>
+      </div>
+    </section>
+
+    <!-- ============ 眼力游戏 ============ -->
+    <section class="screen" id="screenQuiz">
+      <div class="quiz-head">
+        <div class="q-prog"><i id="qBar"></i></div>
+        <div class="q-meta"><span id="qIdx">1 / 10</span><span id="qScore">0 分</span></div>
+      </div>
+      <div class="stage-wrap short">
+        <canvas id="qStage"></canvas>
+        <div class="q-flag" id="qFlag"></div>
+      </div>
+      <div class="card q-body">
+        <div class="q-title" id="qTitle">这双眼睛在想什么？</div>
+        <div class="opts" id="qOpts"></div>
+        <div class="q-explain" id="qExplain"></div>
+      </div>
+      <div class="train-actions">
+        <button class="btn ghost" id="btnQuizExit">退出</button>
+        <button class="btn primary" id="btnQuizNext" disabled>下一题</button>
+      </div>
+    </section>
+
+    <!-- ============ 动物挑战 ============ -->
+    <section class="screen" id="screenAnimal">
+      <div class="stage-wrap">
+        <canvas id="aStage"></canvas>
+        <div class="hud-top">
+          <div class="hud-pill" id="aTimer">0.0s</div>
+          <div class="hud-pill alt" id="aBest">最佳 —</div>
+        </div>
+        <div class="hud-state" id="aBanner">选一只，盯住它的眼睛</div>
+      </div>
+      <div class="picks" id="aPicks"></div>
+      <div class="train-actions">
+        <button class="btn ghost" id="btnAnimalExit">退出</button>
+        <button class="btn primary" id="btnAnimalStart">开始挑战</button>
+        <button class="btn ghost" id="btnAnimalShare">分享卡</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ 3 秒法则 / 帮助 ============ -->
+  <div class="sheet" id="sheetRule">
+    <div class="sheet-bg" data-close="1"></div>
+    <div class="sheet-body">
+      <div class="sheet-h">3 秒法则</div>
+      <div class="rule-list">
+        <div class="rule"><b>看 2～3 秒</b><span>人对视超过 4 秒会生理性不适——这是普遍现象，不是病。</span></div>
+        <div class="rule"><b>自然移开 1 秒</b><span>移开不是退缩，是给对方喘口气。不看的时候对方会松弛下来。</span></div>
+        <div class="rule"><b>再回来看</b><span>社交自如的人不是能一直盯，而是"看—移—回看"的节奏自然。</span></div>
+      </div>
+      <div class="sheet-tip" id="ruleTip">所以本应用的目标不是"让你敢一直盯着"，而是让你练出<em>节奏</em>。</div>
+      <button class="btn primary wide" data-close="1">知道了</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script src="js/store.js"></script>
+<script src="js/expressions.js"></script>
+<script src="js/face.js"></script>
+<script src="js/session.js"></script>
+<script src="js/track.js"></script>
+<script src="js/quiz.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
