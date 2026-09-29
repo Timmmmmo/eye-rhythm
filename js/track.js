@@ -203,6 +203,8 @@ window.XTJY = window.XTJY || {};
       T.stream = null;
     }
     if (T.video) { try { T.video.srcObject = null; } catch (_) {} }
+    // 停流后允许重新 init（设置里关摄像头再打开的路径）
+    if (T.status === "ready") T.status = "idle";
   }
 
   /** 每帧读一次；返回 T.last（对象引用，别缓存） */

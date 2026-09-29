@@ -84,8 +84,9 @@ window.XTJY = window.XTJY || {};
     // 当日稳视分取"历史最好一轮"，避免越练越低打击积极性
     t.score = Math.max(t.score, r.score);
     t.best = Math.max(t.best, r.best);
-    t.avg = t.avg ? round1((t.avg + r.avg) / 2) : round1(r.avg);
-    t.hit = r.hit;
+    // 用真实加权平均，而不是 (旧+新)/2 的伪平均（练 5 轮后旧数据权重会虚高）
+    t.avg = round1((t.avg * (t.sessions - 1) + r.avg) / t.sessions);
+    t.hit = round1(((t.hit || 0) * (t.sessions - 1) + r.hit) / t.sessions * 100) / 100;
     t.blinks = r.blinks;
     t.rounds += r.rounds;
 
@@ -139,6 +140,52 @@ window.XTJY = window.XTJY || {};
   function setSetting(k, v) { var d = load(); d.settings[k] = v; save(); }
   function markSeen(k) { var d = load(); d.seen[k] = true; save(); }
 
+  /** 导出存档（换机/备份）。只含分数与时长，不含任何画面/人脸数据。 */
+  function exportData() {
+    // 必须拷贝：不能把 _exportedAt/_app 写进运行中的 cache，否则会被 save() 持久化
+    var d = clone(load());
+    d._exportedAt = new Date().toISOString();
+    d._app = "eye-rhythm";
+    return JSON.stringify(d);
+  }
+
+  /** 导入存档。校验结构后深合并，导入失败不破坏现有数据。 */
+  function importData(json) {
+    var p = typeof json === "string" ? JSON.parse(json) : json;
+    if (!p || typeof p !== "object" || typeof p.days !== "object") {
+      throw new Error("invalid");
+    }
+    var next = merge(clone(EMPTY), p);
+    delete next._exportedAt;
+    delete next._app;
+    cache = next;
+    save();
+    return cache;
+  }
+
+  /** 汇总：用于首页趋势与分享卡 */
+  function stats(days) {
+    days = days || 14;
+    var series = last(days);
+    var trained = 0, totalSessions = 0, maxScore = 0, sumScore = 0;
+    for (var i = 0; i < series.length; i++) {
+      if (series[i].sessions > 0) {
+        trained++;
+        totalSessions += series[i].sessions;
+        maxScore = Math.max(maxScore, series[i].score);
+        sumScore += series[i].score;
+      }
+    }
+    return {
+      days: series,
+      trainedDays: trained,
+      totalSessions: totalSessions,
+      maxScore: maxScore,
+      avgScore: trained ? Math.round(sumScore / trained) : 0,
+      streak: streak()
+    };
+  }
+
   function reset() {
     cache = clone(EMPTY);
     try { localStorage.removeItem(KEY); } catch (_) {}
@@ -150,6 +197,7 @@ window.XTJY = window.XTJY || {};
   N.store = {
     get: get, save: save, day: day, todayKey: todayKey, streak: streak, last: last,
     recordSession: recordSession, recordQuiz: recordQuiz, recordAnimal: recordAnimal,
-    setSetting: setSetting, markSeen: markSeen, reset: reset, round1: round1
+    setSetting: setSetting, markSeen: markSeen, reset: reset, round1: round1,
+    exportData: exportData, importData: importData, stats: stats
   };
 })(window.XTJY);

@@ -77,37 +77,45 @@ npx serve mvp         # 然后开 http://localhost:3000
 ## 三、文件结构
 
 ```
-mvp/                  ← 这个目录就是发布出去的站点根目录
   .nojekyll           让 Pages 不要走 Jekyll
-  index.html          页面骨架（6 个屏幕 + 规则弹层）
+  index.html          页面骨架（6 个屏幕 + 规则/设置弹层）
   style.css           深色克制风；100dvh + 安全区；窄屏/横屏兜底
-  js/store.js         本地存档（打卡 / 曲线 / 解锁 / 动物纪录），只增字段不丢数据
+  js/store.js         本地存档（打卡 / 曲线 / 解锁 / 动物纪录 / 导出导入），只增字段不丢数据
   js/expressions.js   10 种眼神语义 + 易混对（题库与神态库共用一份定义）
   js/face.js          ★ 程序化「脸+眼」渲染器（零素材）
-  js/session.js       ★ 眼神节奏计分 + 互惠反馈状态机
+  js/session.js       ★ 眼神节奏计分 + 互惠反馈状态机 + 轻量 HUD
   js/track.js         ★ 端侧眼神追踪 + 三级降级
   js/quiz.js          眼力游戏控制器（纯逻辑）
   js/app.js           界面装配与主循环
-```
-
-下面这些**不在发布站点里**，是本机的开发/发布工具：
-
-```
-_dev/
-  cdp-check.js        真机验收（Edge + CDP）：报错 / 截图 / 61~62 条断言；CHECK_URL 打线上，COLD=1 模拟首次访问
-  probe.js            一次性 DOM 探针（量几何、取局部放大截图、跑异步等待），排查视觉/加载问题用
-  char-sheet.js       角色总表：一次画出全部风格与神态
-  render-debug.js     渲染问题定位工具
-  shots/              验收截图
-  .profile/           CDP 复用的浏览器 profile（让 3MB 模型留在缓存里，能跑到真实追踪分支）
-                     注意：跑完会长到 ~470MB（浏览器缓存的锅），可以随时删，
-                     删了下次跑首轮会变冷缓存、慢 ~20 秒而已
-
-_deploy/
-  deploy.js           无 git CLI 的发布：建仓 + 开 Pages + Git Data API 推送 + 线上探针
+  tests/              Node 可直接跑的回归测试（核心主张 / 存档 / 装配冒烟）
+  package.json        npm test / npm run serve
 ```
 
 **三个带 ★ 的文件是这个 MVP 的全部价值**：`face.js` 是"固定资产"，`session.js` 是产品判断，`track.js` 是护城河。
+
+---
+
+## 三点五、产品优化轮（PM 评审后落地）
+
+在不改变「3 秒法则」核心机制的前提下，对程序做了完整体检与优化：
+
+| 类别 | 问题 | 处理 |
+| --- | --- | --- |
+| 性能 | 训练 rAF 里每帧调 `summary()`（扫全部轮次 + 拼建议文案） | 新增 `session.hud()` 轻量指标；`summary()` 只在结算用 |
+| 性能 | 每帧 `getBoundingClientRect` + 无条件刷 DOM 文本 | `fitCanvas` 按 dpr/resize 缓存；HUD 文本变更才写 DOM |
+| 数据 | 当日平均轮次是 `(旧+新)/2` 伪平均，练多了权重失真 | 改为按轮次数加权；命中率同样加权 |
+| 留存 | 清缓存/换机数据即丢，且无法备份 | 设置页导出/导入 JSON（只含分数与时长） |
+| 增长 | 只有动物挑战能出分享卡 | 训练结果 / 眼力游戏也有分享卡（仍不涉及画面） |
+| 场景 | 一套提示打天下 | 场景包：日常 / 面试述职 / 相亲约会 / 公开表达 |
+| 设置 | `settings.camera` 只改文案，关了还会申请权限 | 真正停流/恢复；触感开关；一键清空 |
+| 交互 | 列表每次渲染重绑事件；Space 在摄像头 ready 时仍抢占 | 事件委托；Space 仅在允许按压兜底时生效 |
+| 质量 | 仓库无测试 | `tests/`：核心主张 18 + 存档 12 + 装配冒烟；`npm test` |
+
+本地验证：
+
+```bash
+npm test          # 或 node tests/test-session.mjs && node tests/test-store.mjs && node tests/test-app-smoke.mjs
+```
 
 ---
 

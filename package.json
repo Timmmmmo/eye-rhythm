@@ -1,0 +1,14 @@
+{
+  "name": "eye-rhythm",
+  "version": "1.1.1",
+  "private": true,
+  "description": "对视 · Eye Rhythm — 用眼神节奏训练把「敢看」变成「会看」",
+  "scripts": {
+    "test": "node tests/test-session.mjs && node tests/test-store.mjs && node tests/test-app-smoke.mjs && node tests/test-bugs.mjs",
+    "test:session": "node tests/test-session.mjs",
+    "test:store": "node tests/test-store.mjs",
+    "test:smoke": "node tests/test-app-smoke.mjs",
+    "test:bugs": "node tests/test-bugs.mjs",
+    "serve": "npx --yes serve -l 3000 ."
+  }
+}

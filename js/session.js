@@ -282,6 +282,25 @@ window.XTJY = window.XTJY || {};
       return limitSec && (now - S.t0) / 1000 >= limitSec;
     }
 
+    /**
+     * 每帧用的轻量指标（禁止在这里调 summary()）。
+     * summary() 要扫全部轮次、拼建议文案，放在 rAF 里会白白烧 CPU。
+     */
+    function hud() {
+      var hold = S.holdStart ? (S.now - S.holdStart) / 1000 : 0;
+      return {
+        hold: hold,
+        state: S.state,
+        hit: S.totalMs > 0 ? S.lookingMs / S.totalMs : 0,
+        darts: S.darts,
+        rounds: S.rounds.length,
+        lookingMs: S.lookingMs,
+        totalMs: S.totalMs,
+        breathOn: !!S.breathOn,
+        nervous: !!S.nervous
+      };
+    }
+
     // ---------------- 结算 ----------------
     function roundScore(d) {
       if (d < 0.25) return 0.30;
@@ -394,6 +413,7 @@ window.XTJY = window.XTJY || {};
       state: function () { return S; },
       start: start,
       feed: feed,
+      hud: hud,
       breathTick: breathTick,
       endBreath: endBreath,
       summary: summary,

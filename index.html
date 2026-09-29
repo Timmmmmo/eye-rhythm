@@ -1,3 +1,4 @@
+<!-- AI生成 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -9,11 +10,14 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<p data-aigc-mark="1" style="margin:0 0 8px;font-size:10px;line-height:1.3;color:#6b6560;font-weight:400;">AI生成</p>
+
 <div id="app">
 
   <header id="top">
     <div class="brand"><i class="bdot"></i>对视<em>Eye Rhythm</em></div>
     <button class="chip" id="btnToday"><span>今日</span><b id="todayScore">—</b></button>
+    <button class="icon-btn" id="btnSettings" aria-label="设置">⚙</button>
     <button class="icon-btn" id="btnRule" aria-label="3 秒法则">?</button>
   </header>
 
@@ -39,6 +43,11 @@
       <div class="card">
         <div class="card-h">选择难度阶梯<span class="hint">逐步暴露 · 过关解锁</span></div>
         <div class="levels" id="levelList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">训练场景<span class="hint">换场合，换提示</span></div>
+        <div class="scenes" id="sceneList"></div>
       </div>
 
       <div class="grid2">
@@ -106,6 +115,7 @@
       </div>
       <div class="train-actions">
         <button class="btn ghost" id="btnResHome">回首页</button>
+        <button class="btn ghost" id="btnResShare">分享卡</button>
         <button class="btn primary" id="btnResAgain">再来一轮</button>
       </div>
     </section>
@@ -127,6 +137,7 @@
       </div>
       <div class="train-actions">
         <button class="btn ghost" id="btnQuizExit">退出</button>
+        <button class="btn ghost" id="btnQuizShare">分享卡</button>
         <button class="btn primary" id="btnQuizNext" disabled>下一题</button>
       </div>
     </section>
@@ -163,6 +174,34 @@
       </div>
       <div class="sheet-tip" id="ruleTip">所以本应用的目标不是"让你敢一直盯着"，而是让你练出<em>节奏</em>。</div>
       <button class="btn primary wide" data-close="1">知道了</button>
+    </div>
+  </div>
+
+  <!-- ============ 设置 / 存档 ============ -->
+  <div class="sheet" id="sheetSettings">
+    <div class="sheet-bg" data-close="1"></div>
+    <div class="sheet-body">
+      <div class="sheet-h">设置与存档</div>
+      <div class="setting-row">
+        <div class="setting-txt"><b>摄像头</b><span>关闭后改用「按住屏幕 = 注视」</span></div>
+        <label class="switch"><input type="checkbox" id="setCamera"><i></i></label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-txt"><b>紧张时呼吸引导</b><span>游离过多时弹出 4-7-8 呼吸</span></div>
+        <label class="switch"><input type="checkbox" id="setBreath"><i></i></label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-txt"><b>触感反馈</b><span>节奏切换时轻微震动（部分设备）</span></div>
+        <label class="switch"><input type="checkbox" id="setHaptics"><i></i></label>
+      </div>
+      <div class="sheet-tip" id="setInfo">本机存档</div>
+      <div class="setting-actions">
+        <button class="btn ghost" id="btnExport">导出存档</button>
+        <label class="btn ghost file-btn">导入存档<input type="file" id="fileImport" accept="application/json,.json" hidden></label>
+        <button class="btn ghost danger" id="btnReset">清空数据</button>
+      </div>
+      <div class="setting-privacy">导出文件只含分数、时长、解锁进度——不含任何画面或人脸数据。</div>
+      <button class="btn primary wide" data-close="1">完成</button>
     </div>
   </div>
 

@@ -31,9 +31,14 @@
   // 前提：canvas 的布局尺寸必须由 CSS 决定（#stage/#qStage/#aStage 是 100%，#spark 是 100%×70px）。
   // 否则下面改 cv.width/height 会改动布局尺寸，量一次放大一次 —— dpr=2 时直接翻倍。
   // 这条约束由 _dev/cdp-check.js 的「连调两次尺寸不许变大」断言守着。
-  function fitCanvas(cv) {
-    var r = cv.getBoundingClientRect();
+  var fitCache = new WeakMap();
+  function fitCanvas(cv, force) {
+    var cached = fitCache.get(cv);
     var dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (!force && cached && cached.dpr === dpr && cached.seq === fitSeq) {
+      return cached;
+    }
+    var r = cv.getBoundingClientRect();
     var w = Math.max(1, Math.round(r.width || 320));
     var h = Math.max(1, Math.round(r.height || 240));
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
@@ -42,8 +47,13 @@
     }
     var ctx = cv.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return { ctx: ctx, w: w, h: h };
+    var out = { ctx: ctx, w: w, h: h, dpr: dpr, seq: fitSeq };
+    fitCache.set(cv, out);
+    return out;
   }
+  // resize / 旋屏 / 字体加载后 bump，强制重新量一次
+  var fitSeq = 1;
+  function invalidateCanvasCache() { fitSeq += 1; }
 
   function easeObj(cur, tgt, k) {
     Object.keys(tgt).forEach(function (key) {
@@ -168,14 +178,53 @@
         (best ? " · 最好 " + best + " 分" : "") + "</span></span>" +
         '<span class="lv-go">' + (unlocked ? "开始 ›" : "锁") + "</span></button>";
     }).join("");
+  }
 
-    Array.prototype.forEach.call($("levelList").querySelectorAll(".lv"), function (el) {
-      el.addEventListener("click", function () {
-        var lv = parseInt(el.getAttribute("data-lv"), 10);
-        if (lv > store.get().unlocked) { toast("先过上一关：单轮 60 分即解锁"); return; }
-        startTrain(lv);
-      });
+  // 事件委托：避免每次 renderLevels 都批量解绑/重绑
+  function bindLevelList() {
+    $("levelList").addEventListener("click", function (e) {
+      var el = e.target.closest ? e.target.closest(".lv") : null;
+      if (!el) return;
+      var lv = parseInt(el.getAttribute("data-lv"), 10);
+      if (lv > store.get().unlocked) { toast("先过上一关：单轮 60 分即解锁"); return; }
+      startTrain(lv);
     });
+  }
+
+  function renderScenes() {
+    var box = $("sceneList");
+    if (!box) return;
+    box.innerHTML = SCENES.map(function (s) {
+      return '<button class="scene' + (s.id === curScene ? " on" : "") + '" data-scene="' + s.id + '">' +
+        s.short + "</button>";
+    }).join("");
+  }
+
+  function bindScenes() {
+    var box = $("sceneList");
+    if (!box) return;
+    box.addEventListener("click", function (e) {
+      var el = e.target.closest ? e.target.closest(".scene") : null;
+      if (!el) return;
+      curScene = el.getAttribute("data-scene") || "general";
+      renderScenes();
+      var s = sceneCfg(curScene);
+      $("hudNote").textContent = s.tip;
+      toast("场景：" + s.name);
+    });
+  }
+
+  // ==================== 场景包（决定付费意愿的是「明天要见的那个场合」）====================
+  var SCENES = [
+    { id: "general", name: "日常对视", short: "日常", tip: "看它的眼睛，2～3 秒刚好", advice: "先练出「看—移—回看」的节奏，其他场景都从这里长出来。" },
+    { id: "interview", name: "面试 · 述职", short: "面试", tip: "回答关键句时盯住 2～3 秒，说完自然移开", advice: "面试官评估的是「稳定」不是「凶」。答关键句时看住，过渡句时移开扫一眼全场再回来。" },
+    { id: "date", name: "相亲 · 约会", short: "约会", tip: "温柔注视 + 别让对方先尴尬", advice: "对视超过 4 秒会生理性不适。好消息是：自然移开再回看，比一路盯着更显得从容。" },
+    { id: "speak", name: "公开表达", short: "演讲", tip: "一个观点 = 一次 2～3 秒的定点注视", advice: "扫视建立连接，定点注视建立说服力。整场都扫 = 没有重点。" }
+  ];
+  var curScene = "general";
+  function sceneCfg(id) {
+    for (var i = 0; i < SCENES.length; i++) if (SCENES[i].id === id) return SCENES[i];
+    return SCENES[0];
   }
 
   // ==================== 训练 ====================
@@ -196,25 +245,51 @@
     $("btnTrainStart").textContent = "开始";
     $("stateBanner").textContent = "准备好了就点开始";
     $("stateBanner").className = "hud-state";
+    $("stateBanner")._st = null;
     $("roundPill").innerHTML = '注视 0.0s<span class="tgt">/ 目标 3s</span>';
+    $("roundPill")._h = null;
     $("hitPill").textContent = "命中 —";
     $("holdBar").style.width = "0%";
+    $("holdBar")._w = "0%";
+    $("holdBar")._over = false;
     $("holdBar").classList.remove("over");
     $("breathBox").classList.remove("on");
-    $("hudNote").textContent = "看它的眼睛，2～3 秒刚好";
+    $("hudNote").textContent = sceneCfg(curScene).tip;
     show("screenTrain");
     ensureCamera();
     startTrainLoop();
   }
 
   function ensureCamera() {
-    if (N.track.state().status !== "idle") { updateCamLine(); return; }
+    // 用户在设置里关了摄像头：直接走按压模式，不要偷偷开权限框
+    if (store.get().settings.camera === false) {
+      N.track.stop();
+      updateCamLine();
+      return;
+    }
+    var st = N.track.state();
+    // 已在流式传输 / 正在加载：别重复申请
+    if (st.stream || st.status === "loading") { updateCamLine(); return; }
+    // 停过流（设置关过摄像头）后允许重新 init
+    if (st.status === "ready" || st.status === "denied" || st.status === "nocam" ||
+        st.status === "nosupport" || st.status === "nomodel") {
+      // 权限/硬件类失败不自动重试，避免反复弹权限框；其余可重来
+      if (st.status === "denied" || st.status === "nosupport") { updateCamLine(); return; }
+      st.status = "idle";
+    }
+    if (st.status !== "idle") { updateCamLine(); return; }
     N.track.init($("cam"), function () { updateCamLine(); }).then(updateCamLine);
   }
 
   function updateCamLine() {
-    var s = N.track.statusText();
     var el = $("camLine");
+    if (store.get().settings.camera === false) {
+      el.textContent = "摄像头：已在设置中关闭 · 按住屏幕 = 注视";
+      el.className = "camline warn";
+      $("hudNote").textContent = "按住屏幕 = 注视，松开 = 移开";
+      return;
+    }
+    var s = N.track.statusText();
     el.textContent = s;
     el.className = "camline" + (N.track.state().status === "ready" ? "" : (N.track.isFallback() ? " warn" : ""));
     if (N.track.canHold()) {
@@ -261,16 +336,19 @@
   }
 
   function updateHud(now, info) {
+    // 只取轻量指标：summary() 要扫全部轮次并拼建议文案，放在 rAF 里会白白烧 CPU
+    var H = train.sess.hud();
     var S = train.sess.state();
-    var hold = S.holdStart ? (now - S.holdStart) / 1000 : 0;
-    var sum = train.sess.summary();
+    var hold = H.hold;
 
-    $("roundPill").innerHTML = "注视 " + hold.toFixed(1) + 's<span class="tgt">/ 目标 3s</span>';
-    $("hitPill").textContent = "命中 " + Math.round(sum.hit * 100) + "%";
+    setText($("roundPill"), "注视 " + hold.toFixed(1) + 's<span class="tgt">/ 目标 3s</span>', true);
+    setText($("hitPill"), "命中 " + Math.round(H.hit * 100) + "%");
 
     var bar = $("holdBar");
-    bar.style.width = Math.min(100, (hold / 4) * 100) + "%";
-    bar.classList.toggle("over", hold > 4);
+    var pct = Math.min(100, (hold / 4) * 100) + "%";
+    if (bar._w !== pct) { bar._w = pct; bar.style.width = pct; }
+    var over = hold > 4;
+    if (bar._over !== over) { bar._over = over; bar.classList.toggle("over", over); }
 
     var b = $("stateBanner");
     var map = {
@@ -280,14 +358,36 @@
       uncomfortable: ["它有点不适了 —— 现在自然移开", "warn"],
       avoid: ["它先移开了视线", "bad"]
     };
-    var m = map[S.state] || ["", ""];
+    var m = map[H.state] || ["", ""];
     if (b.textContent !== m[0]) b.textContent = m[0];
-    b.className = "hud-state " + m[1];
+    var cls = "hud-state " + m[1];
+    if (b.className !== cls) b.className = cls;
 
-    if (S.state === "reward") $("hudNote").textContent = "在 2～3 秒之间自然移开，比撑到 5 秒更好";
-    else if (S.state === "uncomfortable") $("hudNote").textContent = "超过 4 秒，它已经不自在了 —— 要练的就是识别这个信号";
-    else if (S.state === "avoid") $("hudNote").textContent = "现实中对方也会先躲开，这就是信号";
-    else if (S.state === "relax") $("hudNote").textContent = N.track.canHold() ? "按住屏幕 = 注视，松开 = 移开" : "看它的眼睛，2～3 秒刚好";
+    // 状态跃迁时给一次轻微震动（支持的设备上强化「节奏」反馈）
+    if (b._st !== H.state) {
+      if (b._st) buzz(H.state === "reward" ? 12 : H.state === "uncomfortable" || H.state === "avoid" ? 28 : 8);
+      b._st = H.state;
+    }
+
+    if (H.state === "reward") setText($("hudNote"), "在 2～3 秒之间自然移开，比撑到 5 秒更好");
+    else if (H.state === "uncomfortable") setText($("hudNote"), "超过 4 秒，它已经不自在了 —— 要练的就是识别这个信号");
+    else if (H.state === "avoid") setText($("hudNote"), "现实中对方也会先躲开，这就是信号");
+    else if (H.state === "relax") setText($("hudNote"), N.track.canHold() ? "按住屏幕 = 注视，松开 = 移开" : sceneCfg(curScene).tip);
+  }
+
+  function setText(el, html, isHtml) {
+    if (!el) return;
+    if (isHtml) {
+      if (el._h !== html) { el._h = html; el.innerHTML = html; }
+    } else if (el.textContent !== html) {
+      el.textContent = html;
+    }
+  }
+
+  function buzz(ms) {
+    try {
+      if (store.get().settings.haptics !== false && navigator.vibrate) navigator.vibrate(ms);
+    } catch (_) {}
   }
 
   function updateBreath(now) {
@@ -324,7 +424,7 @@
 
   function renderResult(sum) {
     $("resScore").textContent = sum.score;
-    $("resTitle").textContent = "本轮稳视分（第 " + train.level + " 关）";
+    $("resTitle").textContent = "本轮稳视分（第 " + train.level + " 关 · " + sceneCfg(curScene).name + "）";
     $("resVerdict").innerHTML = "<b>" + sum.verdict.t + "</b><span>" + sum.verdict.s + "</span>";
 
     var items = [
@@ -341,22 +441,36 @@
       return '<div class="m"><u>' + m.u + "</u><s>" + m.s + "</s></div>";
     }).join("");
 
-    $("resAdvice").innerHTML = sum.advice.map(function (a) {
+    var advice = sum.advice.slice();
+    advice.push({ k: "ok", t: sceneCfg(curScene).advice });
+    $("resAdvice").innerHTML = advice.map(function (a) {
       return '<li class="' + (a.k || "") + '">' + a.t + "</li>";
     }).join("");
 
-    var nextLv = store.get().unlocked;
-    if (nextLv > train.level) toast("解锁第 " + nextLv + " 关！");
+    // 结果页的下一步要给「今天还差什么」的闭环，而不是只有一个再来一轮
+    var unlocked = store.get().unlocked;
+    var btn = $("btnResAgain");
+    if (unlocked > train.level && sum.score >= 60) {
+      btn.textContent = "去第 " + unlocked + " 关";
+      btn._goLevel = unlocked;
+    } else {
+      btn.textContent = "再来一轮";
+      btn._goLevel = train.level;
+    }
+    lastTrainSummary = sum;
   }
+  var lastTrainSummary = null;
 
   // ==================== 眼力游戏 ====================
-  var quiz = { q: null, cur: null, tgt: null, raf: 0, phase: "idle", reveal: false, t0: 0 };
+  var quiz = { q: null, cur: null, tgt: null, raf: 0, phase: "idle", reveal: false, t0: 0, recorded: false };
 
   function startQuiz() {
     quiz.q = N.quiz.create(10);
     quiz.cur = F.animBase();
     quiz.tgt = F.animBase();
     quiz.phase = "run";
+    quiz.reveal = false;
+    quiz.recorded = false;
     show("screenQuiz");
     renderQuestion();
     startQuizLoop();
@@ -413,9 +527,7 @@
     $("qOpts").innerHTML = it.options.map(function (o) {
       return '<button class="opt" data-id="' + o.id + '">' + o.label + "</button>";
     }).join("");
-    Array.prototype.forEach.call($("qOpts").querySelectorAll(".opt"), function (el) {
-      el.addEventListener("click", function () { pickAnswer(el.getAttribute("data-id")); });
-    });
+    // 选项点击走 #qOpts 事件委托（bindQuizOpts），这里只负责重绘
   }
 
   function pickAnswer(id) {
@@ -449,6 +561,11 @@
     var sc = q.score();
     var pct = q.percentile(sc);
     var r = q.rating(sc);
+    // 结算即入账（不要绑在分享按钮上，否则不分享就永远没成绩）
+    if (!quiz.recorded) {
+      quiz.recorded = true;
+      store.recordQuiz(sc);
+    }
     /* 进度条走满 */
     $("qBar").style.width = "100%";
     $("qIdx").textContent = "已完成";
@@ -498,13 +615,25 @@
       return '<button class="pick' + (a.id === ani.id ? " on" : "") + '" data-id="' + a.id + '">' +
         a.name + " · " + a.sub + "</button>";
     }).join("");
-    Array.prototype.forEach.call($("aPicks").querySelectorAll(".pick"), function (el) {
-      el.addEventListener("click", function () {
-        ani.id = el.getAttribute("data-id");
-        ani.acc = 0; ani.curSec = 0; ani.running = false;
-        renderAnimalPicks(); renderAnimalBest();
-        $("aBanner").textContent = "换成了" + F.animalCfg(ani.id).name + "，点开始挑战";
-      });
+    // 点击走 #aPicks 事件委托（bindAnimalPicks）
+  }
+
+  function bindAnimalPicks() {
+    $("aPicks").addEventListener("click", function (e) {
+      var el = e.target.closest ? e.target.closest(".pick") : null;
+      if (!el) return;
+      ani.id = el.getAttribute("data-id");
+      ani.acc = 0; ani.curSec = 0; ani.running = false;
+      renderAnimalPicks(); renderAnimalBest();
+      $("aBanner").textContent = "换成了" + F.animalCfg(ani.id).name + "，点开始挑战";
+    });
+  }
+
+  function bindQuizOpts() {
+    $("qOpts").addEventListener("click", function (e) {
+      var el = e.target.closest ? e.target.closest(".opt") : null;
+      if (!el || el.disabled) return;
+      pickAnswer(el.getAttribute("data-id"));
     });
   }
 
@@ -523,6 +652,8 @@
   }
 
   function stopAnimal() {
+    // 挑战中途退出也要结算，否则用户点「退出」或切页会白练
+    if (ani.running) animalStop();
     cancelAnimationFrame(ani.raf);
     ani.raf = 0;
     ani.phase = "idle";
@@ -596,6 +727,7 @@
   }
 
   // ==================== 分享卡 ====================
+  // 训练模块不晒脸、眼力/动物纯游戏可晒——分享文案要遵守这条边界
   function shareCard(kind) {
     var W = 1080, H = 1350;
     var cv = document.createElement("canvas");
@@ -627,18 +759,39 @@
       ctx.fillStyle = "rgba(255,178,107,.9)";
       ctx.font = "600 38px -apple-system,PingFang SC,sans-serif";
       ctx.fillText("你能撑几秒？", W / 2, 1180);
+    } else if (kind === "quiz") {
+      var q = store.get().quiz;
+      F.draw(ctx, W, 700, { species: "human", style: "real", seed: "quizcard", scale: 1.3 }, F.animBase(), { noClear: true, noBg: true });
+      ctx.fillStyle = "#fff";
+      ctx.font = "700 130px -apple-system,PingFang SC,sans-serif";
+      ctx.fillText(String(q.best || 0), W / 2, 920);
+      ctx.fillStyle = "rgba(232,238,251,.72)";
+      ctx.font = "500 40px -apple-system,PingFang SC,sans-serif";
+      ctx.fillText("眼力游戏最好成绩", W / 2, 986);
+      ctx.fillStyle = "rgba(232,238,251,.9)";
+      ctx.font = "600 36px -apple-system,PingFang SC,sans-serif";
+      ctx.fillText("已玩 " + (q.plays || 0) + " 次 · 全程不碰摄像头", W / 2, 1070);
+      ctx.fillStyle = "rgba(255,178,107,.9)";
+      ctx.font = "600 36px -apple-system,PingFang SC,sans-serif";
+      ctx.fillText("你能读懂多少眼神？", W / 2, 1180);
     } else {
-      var d = store.get(), t = store.day();
+      // train / day：只晒分数与时长，不涉及任何画面
+      var t = store.day();
+      var sum = kind === "train" && lastTrainSummary ? lastTrainSummary : null;
       F.draw(ctx, W, 700, { species: "human", style: "real", seed: "card", scale: 1.3 }, F.animBase(), { noClear: true, noBg: true });
       ctx.fillStyle = "#fff";
       ctx.font = "700 130px -apple-system,PingFang SC,sans-serif";
-      ctx.fillText(String(t.score || 0), W / 2, 920);
+      ctx.fillText(String(sum ? sum.score : (t.score || 0)), W / 2, 920);
       ctx.fillStyle = "rgba(232,238,251,.72)";
       ctx.font = "500 40px -apple-system,PingFang SC,sans-serif";
-      ctx.fillText("今日稳视分", W / 2, 986);
+      ctx.fillText(sum ? "本轮稳视分" : "今日稳视分", W / 2, 986);
       ctx.fillStyle = "rgba(232,238,251,.9)";
       ctx.font = "600 36px -apple-system,PingFang SC,sans-serif";
-      ctx.fillText("最长注视 " + (t.best || 0).toFixed(1) + "s · 命中率 " + Math.round((t.hit || 0) * 100) + "%", W / 2, 1070);
+      if (sum) {
+        ctx.fillText("最长注视 " + sum.best.toFixed(1) + "s · 节奏分 " + sum.rhythm, W / 2, 1070);
+      } else {
+        ctx.fillText("最长注视 " + (t.best || 0).toFixed(1) + "s · 命中率 " + Math.round((t.hit || 0) * 100) + "%", W / 2, 1070);
+      }
       ctx.fillStyle = "rgba(255,178,107,.9)";
       ctx.font = "600 36px -apple-system,PingFang SC,sans-serif";
       ctx.fillText("对视超过 4 秒，其实谁都不舒服 —— 关键是节奏", W / 2, 1180);
@@ -651,6 +804,62 @@
     var url = cv.toDataURL("image/png");
     download(url, "对视_" + kind + "_" + Date.now() + ".png");
     toast("分享卡已保存到下载目录");
+    return url;
+  }
+
+  // ==================== 设置 / 存档迁移 ====================
+  function openSettings(v) {
+    var sheet = $("sheetSettings");
+    if (!sheet) return;
+    if (v) {
+      syncSettingsUI();
+      sheet.classList.add("show");
+    } else {
+      sheet.classList.remove("show");
+    }
+  }
+
+  function syncSettingsUI() {
+    var s = store.get().settings;
+    var cam = $("setCamera"), breath = $("setBreath"), hap = $("setHaptics");
+    if (cam) cam.checked = s.camera !== false;
+    if (breath) breath.checked = s.breath !== false;
+    if (hap) hap.checked = s.haptics !== false;
+    var st = store.stats(14);
+    var info = $("setInfo");
+    if (info) {
+      info.textContent = "本机存档 · 连续 " + st.streak + " 天 · 累计 " + st.totalSessions +
+        " 轮 · 最好 " + st.maxScore + " 分。数据只在本机，可导出备份。";
+    }
+  }
+
+  function exportSave() {
+    try {
+      var json = store.exportData();
+      var blob = new Blob([json], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      download(url, "对视_存档_" + store.todayKey() + ".json");
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      toast("存档已导出（只含分数与时长）");
+    } catch (_) {
+      toast("导出失败");
+    }
+  }
+
+  function importSaveFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        store.importData(String(reader.result));
+        renderHome();
+        syncSettingsUI();
+        toast("存档已导入");
+      } catch (_) {
+        toast("导入失败：文件格式不对");
+      }
+    };
+    reader.readAsText(file);
   }
 
   // ==================== 事件绑定 ====================
@@ -660,8 +869,60 @@
     $("btnRule").addEventListener("click", function () { openSheet(true); });
     $("btnToday").addEventListener("click", function () { openSheet(true); });
     Array.prototype.forEach.call(document.querySelectorAll("[data-close]"), function (el) {
-      el.addEventListener("click", function () { openSheet(false); });
+      el.addEventListener("click", function () {
+        openSheet(false);
+        openSettings(false);
+      });
     });
+
+    // 设置
+    var btnSet = $("btnSettings");
+    if (btnSet) btnSet.addEventListener("click", function () { openSettings(true); });
+
+    var cam = $("setCamera"), breath = $("setBreath"), hap = $("setHaptics");
+    if (cam) cam.addEventListener("change", function () {
+      store.setSetting("camera", cam.checked);
+      if (cam.checked) {
+        // 打开摄像头时允许重试（即便之前 denied，用户可能已在浏览器里授权）
+        var st = N.track.state();
+        if (!st.stream && st.status !== "loading") st.status = "idle";
+        ensureCamera();
+        toast("摄像头已开启（画面仍不出本机）");
+      } else {
+        N.track.stop();
+        toast("已关闭摄像头 · 按住屏幕 = 注视");
+      }
+      updateCamLine();
+    });
+    if (breath) breath.addEventListener("change", function () {
+      store.setSetting("breath", breath.checked);
+    });
+    if (hap) hap.addEventListener("change", function () {
+      store.setSetting("haptics", hap.checked);
+      if (hap.checked) buzz(16);
+    });
+
+    var btnExport = $("btnExport");
+    if (btnExport) btnExport.addEventListener("click", exportSave);
+    var fileIn = $("fileImport");
+    if (fileIn) fileIn.addEventListener("change", function () {
+      importSaveFile(fileIn.files && fileIn.files[0]);
+      fileIn.value = "";
+    });
+    var btnReset = $("btnReset");
+    if (btnReset) btnReset.addEventListener("click", function () {
+      if (confirm("确定清空本机存档？此操作不可恢复。")) {
+        store.reset();
+        renderHome();
+        syncSettingsUI();
+        toast("存档已清空");
+      }
+    });
+
+    bindLevelList();
+    bindScenes();
+    bindQuizOpts();
+    bindAnimalPicks();
 
     $("goQuiz").addEventListener("click", startQuiz);
     $("goAnimal").addEventListener("click", function () { startAnimal(); });
@@ -681,7 +942,7 @@
       }
     });
     $("btnTrainShot").addEventListener("click", function () {
-      var f = fitCanvas($("stage"));
+      var f = fitCanvas($("stage"), true);
       F.draw(f.ctx, f.w, f.h, train.ch, train.cur);
       download($("stage").toDataURL("image/png"), "对视_画面_" + Date.now() + ".png");
       toast("已保存当前画面");
@@ -689,7 +950,12 @@
 
     // 复盘
     $("btnResHome").addEventListener("click", function () { show("screenHome"); renderHome(); });
-    $("btnResAgain").addEventListener("click", function () { startTrain(train.level); });
+    $("btnResAgain").addEventListener("click", function () {
+      var go = ($("btnResAgain")._goLevel) || train.level;
+      startTrain(go);
+    });
+    var btnResShare = $("btnResShare");
+    if (btnResShare) btnResShare.addEventListener("click", function () { shareCard("train"); });
 
     // 眼力
     $("btnQuizExit").addEventListener("click", function () { stopQuiz(); show("screenHome"); renderHome(); });
@@ -699,6 +965,11 @@
       if (!quiz.reveal) { toast("先选一个答案"); return; }
       q.next();
       renderQuestion();
+    });
+    var btnQuizShare = $("btnQuizShare");
+    if (btnQuizShare) btnQuizShare.addEventListener("click", function () {
+      // 分享不再写成绩：写入在 renderQuizSummary，避免分享一次加一次 plays
+      shareCard("quiz");
     });
 
     // 动物
@@ -712,6 +983,7 @@
     var stageWrap = document.querySelector("#screenTrain .stage-wrap");
     var aWrap = document.querySelector("#screenAnimal .stage-wrap");
     function hold(el) {
+      if (!el) return;
       el.addEventListener("pointerdown", function (e) {
         if (!N.track.canHold()) return;
         e.preventDefault(); N.track.setMock(true);
@@ -721,15 +993,25 @@
       });
     }
     hold(stageWrap); hold(aWrap);
-    window.addEventListener("keydown", function (e) { if (e.code === "Space") { N.track.setMock(true); e.preventDefault(); } });
-    window.addEventListener("keyup", function (e) { if (e.code === "Space") { N.track.setMock(false); } });
-
-    // 尺寸变化：重画
-    window.addEventListener("resize", function () {
-      if (curScreen === "screenHome") drawSpark($("spark"), store.last(14));
+    // Space 只在允许按压兜底时生效：摄像头 ready 时抢占会干扰真实追踪
+    window.addEventListener("keydown", function (e) {
+      if (e.code === "Space" && N.track.canHold()) {
+        N.track.setMock(true);
+        e.preventDefault();
+      }
     });
+    window.addEventListener("keyup", function (e) {
+      if (e.code === "Space") N.track.setMock(false);
+    });
+
+    // 尺寸变化：缓存失效 + 重画
+    function onViewportChange() {
+      invalidateCanvasCache();
+      if (curScreen === "screenHome") drawSpark($("spark"), store.last(14));
+    }
+    window.addEventListener("resize", onViewportChange);
     window.addEventListener("orientationchange", function () {
-      setTimeout(function () { if (curScreen === "screenHome") drawSpark($("spark"), store.last(14)); }, 260);
+      setTimeout(onViewportChange, 260);
     });
 
     // 首访自动弹一次 3 秒法则（这是产品的认知入口）
@@ -743,6 +1025,7 @@
   function boot() {
     bind();
     renderHome();
+    renderScenes();
     // 首页先预热摄像头状态文案（不主动开摄像头，避免一进来就弹权限）
     updateCamLine();
 
@@ -757,5 +1040,5 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 
-  N.app = { show: show, toast: toast, share: shareCard, train: train };
+  N.app = { show: show, toast: toast, share: shareCard, train: train, sceneCfg: sceneCfg, SCENES: SCENES };
 })(window.XTJY);
